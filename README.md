@@ -1,29 +1,50 @@
-# SmartDataLink Fix - OTi 互联线一键修复
+# 两机互联实践 — 键鼠 / 剪贴板 / 文件共享
 
-一键修复 OTi USB 互联线 (Smart KM Link / U3 KM Link, VID_0EA0&PID_7301) 软件栈卡死: 键盘/鼠标切换失灵、托盘卡住。
+两台 Windows 电脑的日常互联方案沉淀:局域网键鼠共享(Mouse without Borders)+ 大文件 SMB 共享。
+互拷线(OTi USB 线缆)方案已退役,其完整诊断记录是一个分支,见 [INVESTIGATION.md](INVESTIGATION.md)。
 
-## 用法
+## 网络架构(实测 2026-10-12)
 
-1. 下载 Fix-KMLink.cmd 和 Fix-KMLink.ps1 到同一目录
-2. 右键 Fix-KMLink.cmd -> 以管理员身份运行 (必须提权: LinkEngKM 旧实例可能杀不掉)
-3. 看到 [3/3] 和状态汇报即完成
+| 机器 | 角色 | 网络 |
+|---|---|---|
+| A 机 (U3D客户端-代逸) | 主控方 | 有线 `10.1.55.164` |
+| B 机 (DESKTOP-UH05BR2) | 被控/文件服务 | WLAN `10.182.174.217`(网关 .126,Realtek 2.5GbE 网卡空置) |
 
-要彻底停掉软件栈 (自愈死锁循环时): 双击 Stop-KMLink.cmd (自动提权)
+- 两网段**路由互通**(B 可 ping A),非同子网 → 一切"自动发现"都不可用,配置一律手填 IP
+- 所在 Wi-Fi 有第三方设备,**任何入站端口只做 IP 白名单放行**,不裸开
+- SMB 等网络登录用账户密码,**PIN 不行**;微软账户填邮箱+密码
 
-脚本默认【不会】重启 USB 设备节点 -- 见下方陷阱。
+## 键鼠 + 剪贴板:Mouse without Borders
 
-## 已知陷阱 (实测踩坑记录)
+### 安装配对(一次性)
+1. 两机各自 `winget install Microsoft.MouseWithoutBorders`(v2.2.1;MSI 自带防火墙入站放行)
+2. 一端向导 INSTALL 生成密钥,另一端 CONNECT 粘贴
+3. 跨网段必须手填 **Settings → IP Mapping**:对端机器名 → 对端 IP
+4. 自启动:确认 HKCU `...\Run` 有 `MouseWithoutBorders` 项,**MSI 向导不一定自动加**,没有就手动补一条指向 exe 的字符串值;配对完成后开机自动重连
 
-- **pnputil /restart-device 会把线缆固件打到挂死**: 复合设备卡在 ProblemCode 21 ("正在删除设备"死锁), 全部子设备 [Unknown], D 盘消失, 只有物理重插线缆才能恢复。软件发起的任何 USB 端口重置都可能触发。脚本 v3 起默认跳过该步骤, 需要时用 -RestartDevice 参数显式指定。
-- **LinkEngKM 旧实例可能杀不掉**: 非提权终端 Stop-Process 静默失败, 必须管理员运行。
-- **.ps1 必须带 UTF-8 BOM**: 中文 Windows 的 PowerShell 5.1 把无 BOM 的 UTF-8 按 ANSI/GBK 读, 中文串乱码导致解析失败、窗口闪退 (一行未执行)。编辑/重存脚本时保留 BOM -- v3 推送时曾丢 BOM 回归过一次。
-- **双机同时重启软件栈 + 物理重插后仍不通** (2026-10-12 实测): B->A 控制正常、剪贴板正常、A->B 输入不通 => 线缆固件状态机嫌疑最大, 软件层无法修复。
+### 单向控制(只要 A 控制 B,B 鼠标不许切过去)
+- **首选:B 机关 Easy Mouse**(Settings 里的拖边切换开关,每机独立生效)——B 关 A 不开,即"B 鼠标出不去、A 鼠标自由往返"
+- 备选:隐藏开关 `OneWayControlMode`(二进制逆向确认存在;配置疑似加密 blob,明文注册表注入在 B 端未生效)。**实测语义 = "本机只发不收"**:设在 B 会让 B 拒收 A 的键盘(错误方向),要设应设在 A 机;A 机实测未做,试前备好回滚
+- **双物理鼠标注意**:两机各接鼠标且双向切换时,会发生"指针同一性丢失"——B 鼠标切去 A 再切回后,键盘跟随 A 的本地鼠标继续控制 A。这是 MwB 单用户单鼠标假设的固有坑,单向化后自然消失
 
-## 诊断笔记 (逆向发现)
+### 运维坑
+- UAC 向导配置过的 MwB 实例是**提权**的,非管理员杀不掉;恢复非提权实例:提权脚本里 `explorer.exe` 代理启动
+- MwB 拖拽传文件只适合小文件(暂存目录机制,大文件慢且易卡),大文件走下面的 SMB
 
-- SmartData.exe 装 WH_KEYBOARD_LL/WH_MOUSE_LL 钩子做输入转发, 但只有鼠标钩子有看门狗 ("Mouse Hook MALFUNCTION!!! Exist Myself"), 键盘钩子失效无自愈
-- 切换时 A 通过内部管道发 Cmd_Notify_KM_Switch_To_Remote, B 端 SmartData 应答后才武装 HID 端点接收; B 端不应答则 A 侧已切状态但 B 无输入
-- 已验证的缓解: 禁用 USB 选择性挂起、关闭快速启动
+## 大文件:SMB 共享
+
+- **B 端已配**:命名共享 `E → E:\`(11TB);防火墙 TCP 445 **仅放行 A 的 IP** `10.1.55.164`
+- **A 端使用**:资源管理器输 `\\10.182.174.217\E`,凭据填 B 机账户+密码;建议"映射网络驱动器"固定盘符
+- 备选通道:B 机 `E$` 管理共享(管理员凭据)、MwB 小文件拖拽
+
+## 分支:OTi 互拷线(已退役)
+
+曾用 OTi 方案 USB 互拷线(VID_0EA0&PID_7301)做键鼠切换,后确诊**自愈死锁在线不可修**(重插必触发 B 端 SmartData 3 秒循环,循环期间握手全无效),软件栈已停用、自启已摘除;D 盘(SMARTLINK)为固件直供的只读虚拟光驱,不受影响。完整诊断与逆向记录:**[INVESTIGATION.md](INVESTIGATION.md)**
+
+线缆相关脚本(如临时复用线缆):
+- `Fix-KMLink.cmd` — 重建 OTi 软件栈(默认**不动设备节点**:pnputil 重启节点会把固件打到挂死)
+- `Stop-KMLink.cmd` — 彻底停栈止血(自愈循环时)
+- 两个脚本的通用坑:`.ps1` 必须 UTF-8 **带 BOM**(GBK 系统无 BOM 会解析失败假执行)、必须**管理员**运行(LinkEngKM/LEWD 提权,非管理员静默杀不掉)
 
 ## License
 
