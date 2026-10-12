@@ -46,6 +46,7 @@
 3. 配对：一端生成安全密钥，另一端**手动填对端 IP**——跨网段自动发现不可用。A=10.1.55.164，B=10.182.174.217
 4. 拖动方向按桌面实际布局设置，Alt+S 之类热键与 OTi 栈的热键错开
 5. 定位：线缆修复后作热备；线缆报废后作完全替代
+6. 自启动：确认 HKCU\...\Run 有 `MouseWithoutBorders` 项（MSI 向导不一定自动加，没有就手动补一条指向 MouseWithoutBorders.exe 的字符串值）；配对完成后开机自动重连，无需人工操作
 
 ## 已落地的缓解
 - USB 选择性挂起已禁用（AC+DC）
@@ -57,6 +58,7 @@
 - A 机：内置 Administrator；OTi 栈 1.0.1598.1 @ %APPDATA%\OTi\MacKMLink1598\FunctModules\{92EEDB7D-755A-4a90-A79D-C0BD0ACF1A7F}\
 - 线缆：VID_0EA0&PID_7301；MI_00=RNDIS(被禁用,正常)、MI_02=MSC(D盘)、MI_03=HID鼠标、MI_04=HID键盘、MI_05=WinUSB
 - 配置：HKCU\SOFTWARE\OTi\CBShare（KMSwitchMode=3，热键 Alt+S，B 端 EnableOnlyUseHotkeyToSwitch=1）
+- B 端 OTi 自启动已停用（原 HKCU\...\Run 值 "CS Dispatch" = SmartData.exe -GN:RunFromRegistry -GS:HWID:VID_0EA0&PID_7301 -GS:AppLoaderExeName:SmartDataLink.exe；如需恢复按原文重加该值即可）
 ## A 机分析（14:20，对 B 端自愈循环证据的回应）
 - **时间线致命对齐**：A 侧"输入被吞"测试窗口（约13:45-13:55）与 B 端自愈循环（13:50:28 起）重叠 ⇒ **该窗口内所有 A→B 测试作废**（B 活不过 3 秒，无从应答切换握手）。"A→B 全灭、B→A 正常"的不对称性是测试污染，不构成固件方向性坏死证据。
 - **"拔插反而更糟"谜底**：重插触发 B 端进入自愈循环 → 循环期间一切握手无效 → 死锁（循环停止依赖链路健康，链路健康依赖握手应答）。自愈机制堵死恢复路径。
