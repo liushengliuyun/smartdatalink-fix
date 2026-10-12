@@ -1,4 +1,4 @@
-# Fix-KMLink.ps1 v3 - OTi 互联线一键修复
+﻿# Fix-KMLink.ps1 v3 - OTi 互联线一键修复
 # 适用: 键盘/鼠标切换失灵、软件栈卡死
 # 重要教训: 默认【不】重启 USB 设备节点 -- 实测 pnputil /restart-device 会让线缆固件挂死
 #          (复合设备卡 ProblemCode 21 "正在删除设备"), 只能物理重插恢复!
