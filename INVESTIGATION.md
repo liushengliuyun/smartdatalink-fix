@@ -1,0 +1,37 @@
+# 排查报告：互联线 A→B 输入失效（2026-10-12，A/B 双机会话协同排查）
+
+## 症状演进
+- **慢性（持续存在）**：鼠标能切到 B，键盘控不住 B；随机触发
+- **急性（本次排查期间）**：A→B 鼠标键盘全失效。按 Alt+S 后 A 光标消失（A 侧已切主控态），输入被吞（A/B 都控不了）；B→A 完全正常；剪贴板共享正常；期间线缆多次整体从 USB 总线掉线（D 盘消失）
+
+## 已排除
+- B 端软件状态：B 栈含"杀不掉的 LinkEngKM 旧实例"完整重建后症状不变
+- A 端软件状态：A 栈多次完整重启 + 设备重新枚举后症状不变
+- UIPI/权限：双机内置 Administrator，全 High 完整性
+- LowLevelHooksTimeout 超时摘钩：注册表已 8000ms
+
+## 关键实测发现
+1. **pnputil /restart-device（软件端口重置）会让线缆固件挂死**：复合设备卡 ProblemCode 21（"正在删除设备"死锁），全部子设备 [Unknown]、D 盘消失，只有物理重插能恢复。任何软件发起的 USB 端口重置都是禁手。这解释了"拔插反而更糟"的历史。
+2. B→A 输入正常 + 剪贴板正常 + A→B 全灭 ⇒ 转发链状态劣化，非单侧软件可修
+3. **修正结论（A 机用户指出）**：纯初始状态（双机重启后连线）大概率正常 ⇒ **不是硬件永久损坏，是运行期状态劣化且无法在线恢复，只有冷启动能复位**
+
+## 根因候选（按可能性排序）
+1. **A 端键盘钩子死亡无自愈**（慢性症状根因）：逆向证据 —— SmartData.exe 只有鼠标钩子看门狗（"Mouse Hook MALFUNCTION!!! Exist Myself"），键盘钩子没有；且厂商只给鼠标做了 UAC 补丁（CheckIfReadyToSetMouseHIDToFixUACHookIssue）。可二进制补丁修复。
+2. **固件 A→B HID 转发状态机劣化**（急性症状）：无固件刷新渠道（厂商更新服务器 oursu2u.com 已成空壳页）
+3. 两者叠加：慢性键盘钩子死亡 + 急性需冷启动复位的转发劣化
+
+## 下一步
+1. A 机完整重启（快速启动已禁用，这是首次干净冷启动）→ 若恢复，确认"劣化可复位"
+2. 恢复后观察慢性症状复发规律，为键盘钩子看门狗二进制补丁取证据
+3. 长期修复：给 SmartData.exe 键盘钩子加看门狗补丁（参考鼠标钩子的 MALFUNCTION 自杀重启机制）/ 或换线
+
+## 已落地的缓解
+- USB 选择性挂起已禁用（AC+DC）
+- 快速启动已禁用（HiberbootEnabled=0）
+- "联机完成"弹窗已关（ShowGettingStartCount=999）
+- Fix-KMLink.ps1 v3：完整软件栈重建（默认不动设备节点！）
+
+## 环境速查
+- A 机：内置 Administrator；OTi 栈 1.0.1598.1 @ %APPDATA%\OTi\MacKMLink1598\FunctModules\{92EEDB7D-755A-4a90-A79D-C0BD0ACF1A7F}\
+- 线缆：VID_0EA0&PID_7301；MI_00=RNDIS(被禁用,正常)、MI_02=MSC(D盘)、MI_03=HID鼠标、MI_04=HID键盘、MI_05=WinUSB
+- 配置：HKCU\SOFTWARE\OTi\CBShare（KMSwitchMode=3，热键 Alt+S，B 端 EnableOnlyUseHotkeyToSwitch=1）
