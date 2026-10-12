@@ -1,37 +1,25 @@
 # SmartDataLink Fix - OTi 互联线一键修复
 
-一键修复 OTi USB 互联线 (Smart KM Link / U3 KM Link, VID_0EA0&PID_7301) 的常见故障:
-
-- 键盘/鼠标切换到另一台电脑失灵
-- 拔插线缆无效、越插越糟
-- 虚拟光驱 D 盘 (SMARTLINK) 消失
-- OTi 软件栈卡死 (SmartData / LinkEngKM / LEWD)
-
-## 原理
-
-停掉整个 OTi 软件栈 (含 LEWD 看门狗) -> 用 pnputil 重启线缆 USB 设备节点 -> 按注册表自启动同款参数重新拉起软件栈。
-等效于"两台电脑都重启 + 重新拔插线缆"的软件部分, 免重启。
+一键修复 OTi USB 互联线 (Smart KM Link / U3 KM Link, VID_0EA0&PID_7301) 软件栈卡死: 键盘/鼠标切换失灵、托盘卡住。
 
 ## 用法
 
-1. 下载 Fix-KMLink.cmd 和 Fix-KMLink.ps1 放同一目录 (桌面即可)
-2. 双击 Fix-KMLink.cmd (未提权会自动弹 UAC, 点"是")
-3. 看到 [4/4] 状态汇报即完成
+1. 下载 Fix-KMLink.cmd 和 Fix-KMLink.ps1 到同一目录
+2. 右键 Fix-KMLink.cmd -> 以管理员身份运行 (必须提权: LinkEngKM 旧实例可能杀不掉)
+3. 看到 [3/3] 和状态汇报即完成
 
-若本机修不好 (线缆整体从 USB 总线掉线, 所有设备显示 Unknown), 只能物理重插; 恢复后在另一台电脑上做同样操作。
+脚本默认【不会】重启 USB 设备节点 -- 见下方陷阱。
 
-## 适用环境
+## 已知陷阱 (实测踩坑记录)
 
-- 两台 Windows 电脑 + OTi 方案 USB 互联线 (设备管理器显示 "Oti U3 Transfer Cable", VID_0EA0&PID_7301)
+- **pnputil /restart-device 会把线缆固件打到挂死**: 复合设备卡在 ProblemCode 21 ("正在删除设备"死锁), 全部子设备 [Unknown], D 盘消失, 只有物理重插线缆才能恢复。软件发起的任何 USB 端口重置都可能触发。脚本 v3 起默认跳过该步骤, 需要时用 -RestartDevice 参数显式指定。
+- **LinkEngKM 旧实例可能杀不掉**: 非提权终端 Stop-Process 静默失败, 必须管理员运行。
+- **双机同时重启软件栈 + 物理重插后仍不通** (2026-10-12 实测): B->A 控制正常、剪贴板正常、A->B 输入不通 => 线缆固件状态机嫌疑最大, 软件层无法修复。
 
 ## 诊断笔记 (逆向发现)
 
-- SmartData.exe 装键盘/鼠标低级钩子做转发, 但只有鼠标钩子有看门狗 ("Mouse Hook MALFUNCTION!!!"), 键盘钩子失效后无自愈
-- 切换握手: A 侧切换时经内部管道发 Cmd_Notify_KM_Switch_To_Remote 给 B, B 的 LinkEngKM 应答后固件才把 HID 端点武装为接收模式; B 端应答卡死 -> A 已切出 (光标消失) 但 B 永远收不到输入
-- LinkEngKM 与 LEWD 以高权限运行: 非管理员 Stop-Process 杀不掉且静默失败, 托盘退出/结束"应用"进程也不会碰到它们 -> 修复必须管理员运行, 四进程全杀
-- 剪贴板走数据通道, 与键鼠控制链路相互独立; 剪贴板共享正常不代表控制链路正常
-- 编码坑: 中文 Windows 的 PowerShell 5.1 把无 BOM 的 UTF-8 按 ANSI/GBK 读, 脚本中文串乱码导致解析直接失败 (窗口闪退, 一行未执行) -> .ps1 必须存成 UTF-8 with BOM
-- 故障时线缆可能整体从 USB 总线掉线 (设备管理器全 [Unknown]), 此时软件无解, 只能物理重插
+- SmartData.exe 装 WH_KEYBOARD_LL/WH_MOUSE_LL 钩子做输入转发, 但只有鼠标钩子有看门狗 ("Mouse Hook MALFUNCTION!!! Exist Myself"), 键盘钩子失效无自愈
+- 切换时 A 通过内部管道发 Cmd_Notify_KM_Switch_To_Remote, B 端 SmartData 应答后才武装 HID 端点接收; B 端不应答则 A 侧已切状态但 B 无输入
 - 已验证的缓解: 禁用 USB 选择性挂起、关闭快速启动
 
 ## License
